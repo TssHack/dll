@@ -22,9 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # تنظیمات ربات
-BOT_TOKEN = "YOUR_BOT_TOKEN"
-ADMIN_IDS = [123456789]  # آی‌دی‌های ادمین را اینجا وارد کنید
-CHANNEL_ID = "@YOUR_CHANNEL"  # آی‌دی کانال برای جوین اجباری
+BOT_TOKEN = "7862521087:AAH3-a402vIKzJl4SrT-n3DbG6b68p6Espk"
+ADMIN_IDS = [1848591768]  # آی‌دی‌های ادمین را اینجا وارد کنید
+CHANNEL_ID = "@NexzoTeam"  # آی‌دی کانال برای جوین اجباری
 
 # آدرس‌های API
 API_INSTA = "http://amirplus.alfahost.space/api/downloader/insta-2.php?url="
@@ -608,4 +608,109 @@ async def button_callback(update: Update, context: CallbackContext):
     elif data == "confirm_broadcast" and user_id in ADMIN_IDS:
         broadcast_message = context.user_data.get('broadcast_message', '')
         if not broadcast_message:
-            await
+            await query.message.edit_text(
+                "❌ پیام همگانی یافت نشد. لطفاً مجدداً تلاش کنید.",
+                reply_markup=get_admin_menu()
+            )
+            return
+        
+        # دریافت لیست کاربران فعال
+        users = db.get_all_users()
+        total_users = len(users)
+        success_count = 0
+        
+        status_message = await query.message.edit_text(
+            f"📣 در حال ارسال پیام به {total_users} کاربر...\n\nارسال شده: 0/{total_users}"
+        )
+        
+        # ارسال پیام به کاربران
+        for idx, user_id in enumerate(users):
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=broadcast_message,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                success_count += 1
+                
+                # بروزرسانی وضعیت هر 10 کاربر
+                if (idx + 1) % 10 == 0:
+                    await status_message.edit_text(
+                        f"📣 در حال ارسال پیام به {total_users} کاربر...\n\nارسال شده: {idx + 1}/{total_users}"
+                    )
+                
+                # تاخیر کوتاه برای جلوگیری از محدودیت API تلگرام
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.error(f"Error sending broadcast to user {user_id}: {str(e)}")
+        
+        await status_message.edit_text(
+            f"✅ پیام همگانی به {success_count} کاربر از {total_users} کاربر ارسال شد.",
+            reply_markup=get_admin_menu()
+        )
+    
+    elif data == "back_to_admin" and user_id in ADMIN_IDS:
+        # پاک کردن وضعیت‌های انتظار
+        if 'awaiting_broadcast' in context.user_data:
+            context.user_data.pop('awaiting_broadcast')
+        if 'broadcast_message' in context.user_data:
+            context.user_data.pop('broadcast_message')
+        if 'awaiting_user_id_for_ban' in context.user_data:
+            context.user_data.pop('awaiting_user_id_for_ban')
+        if 'awaiting_user_id_for_unban' in context.user_data:
+            context.user_data.pop('awaiting_user_id_for_unban')
+        
+        await query.message.edit_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
+    
+    elif data == "user_management" and user_id in ADMIN_IDS:
+        keyboard = [
+            [InlineKeyboardButton("🚫 بن کاربر", callback_data="ban_user")],
+            [InlineKeyboardButton("✅ آنبن کاربر", callback_data="unban_user")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin")]
+        ]
+        await query.message.edit_text(
+            "👤 *مدیریت کاربران*\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif data == "ban_user" and user_id in ADMIN_IDS:
+        context.user_data['awaiting_user_id_for_ban'] = True
+        
+        keyboard = [[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]]
+        await query.message.edit_text(
+            "🚫 *بن کاربر*\n\nلطفاً آی‌دی عددی کاربر مورد نظر را وارد کنید:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif data == "unban_user" and user_id in ADMIN_IDS:
+        context.user_data['awaiting_user_id_for_unban'] = True
+        
+        keyboard = [[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]]
+        await query.message.edit_text(
+            "✅ *آنبن کاربر*\n\nلطفاً آی‌دی عددی کاربر مورد نظر را وارد کنید:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+# تابع اصلی
+async def main():
+    # راه‌اندازی ربات
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # اضافه کردن هندلرها
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", lambda update, context: update.message.reply_text(
+        "📚 *راهنمای استفاده از ربات* 📚\n\nبرای دانلود محتوا، کافیست لینک مورد نظر خود را از یکی از پلتفرم‌های زیر ارسال کنید:\n\n*اینستاگرام*: لینک پست، ریل یا استوری\n*تیک‌تاک*: لینک ویدیو\n*پینترست*: لینک پین\n\n🔹 ربات به صورت خودکار نوع لینک را تشخیص داده و محتوا را برای شما دانلود می‌کند.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_main_menu()
+    )))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # شروع پولینگ
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    asyncio.run(main())
