@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # تنظیمات ربات
 BOT_TOKEN = "7862521087:AAH3-a402vIKzJl4SrT-n3DbG6b68p6Espk"
-ADMIN_IDS = [1848591768]  # آی‌دی‌های ادمین را اینجا وارد کنید
+ADMIN_IDS = [1848591768, 7094106651]  # آی‌دی‌های ادمین را اینجا وارد کنید
 CHANNEL_ID = "@NexzoTeam"  # آی‌دی کانال برای جوین اجباری
 
 # آدرس‌های API
@@ -251,7 +251,7 @@ def get_join_markup():
 def get_main_menu():
     keyboard = [
         [InlineKeyboardButton("📥 راهنمای استفاده", callback_data="help")],
-        [InlineKeyboardButton("👨‍💻 ارتباط با توسعه‌دهندگان", url="https://t.me/YOUR_SUPPORT_USERNAME")]
+        [InlineKeyboardButton("👨‍💻 ارتباط با توسعه‌دهندگان", url="https://t.me/NexzoTeam")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -363,7 +363,7 @@ async def handle_message(update: Update, context: CallbackContext):
         return
     
     # بررسی دستورات ادمین
-    if user_id in ADMIN_IDS and text == "/admin":
+    if user_id in ADMIN_IDS and text == "پنل":
         await update.message.reply_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
         return
     
