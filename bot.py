@@ -695,7 +695,7 @@ async def button_callback(update: Update, context: CallbackContext):
         )
 
 # تابع اصلی
-async def main():
+def main():
     # راه‌اندازی ربات
     application = Application.builder().token(BOT_TOKEN).build()
     
@@ -710,7 +710,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # شروع پولینگ
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
