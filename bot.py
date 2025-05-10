@@ -9,7 +9,7 @@ bot_token = '7862521087:AAH3-a402vIKzJl4SrT-n3DbG6b68p6Espk'
 
 bot = TelegramClient('downloader_bot', api_id, api_hash).start(bot_token=bot_token)
 
-‎# توابع APIها
+‎
 async def download_instagram(url):
     api_url = f"http://amirplus.alfahost.space/api/downloader/insta-2.php?url={url}"
     async with aiohttp.ClientSession() as session:
@@ -43,7 +43,7 @@ async def download_youtube(url):
             except:
                 return None
 
-‎# هندل کردن پیام‌های کاربران
+‎
 @bot.on(events.NewMessage(pattern=r'http.*'))
 async def handler(event):
     url = event.raw_text.strip()
