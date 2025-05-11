@@ -30,6 +30,7 @@ CHANNEL_ID = "@NexzoTeam"  # آی‌دی کانال برای جوین اجبار
 API_INSTA = "http://amirplus.alfahost.space/api/downloader/insta-2.php?url="
 API_PINTEREST = "http://amirplus.alfahost.space/api/downloader/pinterest.php?url="
 API_TIKTOK = "http://amirplus.alfahost.space/api/downloader/tiktok.php?url="
+API_YOUTUBE = "http://amirplus.alfahost.space/api/downloader/yt.php?url="
 
 # متغیر قفل برای عملیات همزمان با دیتابیس
 db_lock = threading.Lock()
@@ -222,6 +223,8 @@ def detect_link_type(url):
         return "tiktok"
     elif "pinterest.com" in url or "pin.it" in url:
         return "pinterest"
+    elif "youtube.com" in url or "youtu.be" in url:
+        return "youtube"
     else:
         return None
 
@@ -294,6 +297,7 @@ async def start(update: Update, context: CallbackContext):
 • اینستاگرام
 • تیک‌تاک
 • پینترست
+• یوتیوب
 
 🔹 *راهنمای استفاده*:
 فقط کافیست لینک مورد نظر خود را ارسال کنید!
@@ -371,7 +375,7 @@ async def handle_message(update: Update, context: CallbackContext):
     link_type = detect_link_type(text)
     
     if not link_type:
-        await update.message.reply_text("❌ لینک معتبر نیست. لطفاً لینک معتبری از اینستاگرام، تیک‌تاک یا پینترست ارسال کنید.")
+        await update.message.reply_text("❌ لینک معتبر نیست. لطفاً لینک معتبری از اینستاگرام، تیک‌تاک، پینترست یا یوتیوب ارسال کنید.")
         return
     
     # بررسی عضویت کاربر
@@ -395,6 +399,8 @@ async def handle_message(update: Update, context: CallbackContext):
             await download_tiktok(update, context, text, progress_message)
         elif link_type == "pinterest":
             await download_pinterest(update, context, text, progress_message)
+        elif link_type == "youtube":
+            await download_youtube(update, context, text, progress_message)
         
         # افزایش تعداد دانلودهای کاربر
         db.increment_downloads(user_id)
@@ -524,193 +530,390 @@ async def download_tiktok(update: Update, context: CallbackContext, url: str, pr
             except Exception as e:
                 await progress_message.edit_text(f"❌ خطا در پردازش پاسخ تیک‌تاک: {str(e)}")
 
-# کالبک هندلر
+# دانلود از یوتیوب
+async def download_youtube(update: Update, context: CallbackContext, url: str, progress_message):
+    await progress_message.edit_text("⏳ در حال دریافت اطلاعات از یوتیوب... (25%)")
+    
+    async with aiohttp.ClientSession() as session:
+        # فراخوانی API
+        async with session.get(API_YOUTUBE + url) as response:
+            await progress_message.edit_text("⏳ در حال پردازش اطلاعات یوتیوب... (50%)")
+            
+            if response.status != 200:
+                await progress_message.edit_text("❌ خطا در دریافت اطلاعات از یوتیوب.")
+                return
+            
+            try:
+                data = await response.json()
+                await progress_message.edit_text("⏳ در حال آماده‌سازی لینک‌های دانلود... (75%)")
+                
+                # بررسی داده‌های دریافتی
+                if 'text' in data and 'medias' in data and len(data['medias']) > 0:
+                    title = data['text']
+                    
+                    # ساخت پیام اصلی
+                    message = f"🎬 *{title}*\n\n"
+                    message += "⚠️ *توجه:* امکان دانلود با IP ایران و آلمان فراهم نیست.\n\n"
+                    message += "📥 *لینک‌های دانلود:*\n\n"
+                    
+                    # اضافه کردن لینک‌های ویدیو با کیفیت‌های مختلف
+                    video_formats = []
+                    audio_link = None
+                    
+                    for media in data['medias']:
+                        if media.get('media_type') == 'video' and 'formats' in media:
+                            # مرتب سازی فرمت‌ها بر اساس کیفیت (نزولی)
+                            formats = sorted(media['formats'], 
+                                           key=lambda x: int(x.get('quality_note', '0').replace('p', '')) 
+                                           if x.get('quality_note', '0').replace('p', '').isdigit() else 0, 
+                                           reverse=True)
+                            
+                            # اضافه کردن 3 کیفیت بالاتر به لیست
+                            for i, fmt in enumerate(formats[:3]):
+                                quality = fmt.get('quality_note', 'نامشخص')
+                                video_url = fmt.get('video_url', '')
+                                if video_url:
+                                    size_info = f" - {fmt.get('video_size', 'نامشخص')} بایت" if 'video_size' in fmt else ""
+                                    video_formats.append(f"🎥 *{quality}*: [دانلود ویدیو]({video_url}){size_info}")
+                        
+                        elif media.get('media_type') == 'audio' and 'resource_url' in media:
+                            audio_link = media['resource_url']
+                    
+                    # اضافه کردن لینک‌های ویدیو به پیام
+                    for vf in video_formats:
+                        message += f"{vf}\n"
+                    
+                    # اضافه کردن لینک صوتی اگر موجود باشد
+                    if audio_link:
+                        message += f"\n🎵 *فایل صوتی*: [دانلود صدا]({audio_link})\n"
+                    
+                    message += "\n👨‍💻 @NexzoTeam"
+                    
+                    # ارسال پیام با لینک‌های دانلود
+                    await progress_message.delete()
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=message,
+                        parse_mode=ParseMode.MARKDOWN,
+                        disable_web_page_preview=True
+                    )
+                else:
+                    await progress_message.edit_text("❌ اطلاعات ویدیو یافت نشد یا فرمت داده‌های دریافتی نامعتبر است.")
+            except Exception as e:
+                await progress_message.edit_text(f"❌ خطا در پردازش پاسخ یوتیوب: {str(e)}")
+
+# هندلر دکمه‌ها
 async def button_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = query.from_user.id
-    data = query.data
     
     # بررسی وضعیت بن
     if db.is_user_banned(user_id):
         await query.answer("⛔️ شما از استفاده از این ربات محروم شده‌اید.")
         return
     
+    # بررسی وضعیت ربات
+    if db.get_setting("bot_active") != "1" and user_id not in ADMIN_IDS:
+        await query.answer("🔧 ربات در حال حاضر در دسترس نمی‌باشد.")
+        return
+    
     await query.answer()
     
-    # پردازش کالبک‌های مختلف
-    if data == "check_membership":
-        is_member = await check_user_membership(user_id, context.bot)
-        if is_member:
-            await query.message.edit_text(
-                "✅ عضویت شما تأیید شد. اکنون می‌توانید از ربات استفاده کنید!",
-                reply_markup=get_main_menu()
-            )
-        else:
-            await query.message.edit_text(
-                "❌ شما هنوز عضو کانال نیستید. برای استفاده از ربات لطفاً عضو شوید:",
-                reply_markup=get_join_markup()
-            )
-    
-    elif data == "help":
+    if query.data == "help":
         help_text = """
-📚 *راهنمای استفاده از ربات* 📚
+📋 *راهنمای استفاده از ربات*
 
-برای دانلود محتوا، کافیست لینک مورد نظر خود را از یکی از پلتفرم‌های زیر ارسال کنید:
+این ربات به شما امکان دانلود محتوا از پلتفرم‌های زیر را می‌دهد:
 
-*اینستاگرام*: لینک پست، ریل یا استوری
-*تیک‌تاک*: لینک ویدیو
-*پینترست*: لینک پین
+• *اینستاگرام*: پست‌ها، ریل‌ها و استوری‌ها
+• *تیک‌تاک*: ویدیوها (بدون واترمارک)
+• *پینترست*: تصاویر با کیفیت بالا
+• *یوتیوب*: ویدیوها و فایل‌های صوتی
 
-🔹 ربات به صورت خودکار نوع لینک را تشخیص داده و محتوا را برای شما دانلود می‌کند.
+🔹 *نحوه استفاده*:
+۱. لینک مورد نظر خود را کپی کنید
+۲. آن را در چت ربات ارسال کنید
+۳. منتظر دانلود و ارسال فایل باشید
+
+⚠️ *نکات*:
+• برای دانلود از یوتیوب، از VPN استفاده کنید
+• در صورت بروز خطا، مجدداً تلاش کنید
         """
-        await query.message.edit_text(help_text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu())
+        await query.edit_message_text(text=help_text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu())
     
-    # کالبک‌های مدیریتی (فقط برای ادمین‌ها)
-    elif data == "toggle_join" and user_id in ADMIN_IDS:
-        current_value = db.get_setting("mandatory_join")
-        new_value = "0" if current_value == "1" else "1"
-        db.update_setting("mandatory_join", new_value)
-        await query.message.edit_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
-    
-    elif data == "toggle_bot" and user_id in ADMIN_IDS:
-        current_value = db.get_setting("bot_active")
-        new_value = "0" if current_value == "1" else "1"
-        db.update_setting("bot_active", new_value)
-        await query.message.edit_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
-    
-    elif data == "stats" and user_id in ADMIN_IDS:
-        stats = db.get_stats()
+    elif query.data == "check_membership":
+        is_member = await check_user_membership(user_id, context.bot)
         
+        if is_member:
+            welcome_text = """
+🌟 *به ربات دانلودر چندرسانه‌ای خوش آمدید* 🌟
+
+با استفاده از این ربات می‌توانید محتوا را از پلتفرم‌های زیر دانلود کنید:
+• اینستاگرام
+• تیک‌تاک
+• پینترست
+• یوتیوب
+
+🔹 *راهنمای استفاده*:
+فقط کافیست لینک مورد نظر خود را ارسال کنید!
+            """
+            await query.edit_message_text(text=welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu())
+        else:
+            await query.answer("❌ شما هنوز عضو کانال نشده‌اید!")
+    
+    # هندلرهای منوی ادمین
+    elif query.data == "toggle_join":
+        if user_id not in ADMIN_IDS:
+            return
+        
+        current_status = db.get_setting("mandatory_join")
+        new_status = "0" if current_status == "1" else "1"
+        db.update_setting("mandatory_join", new_status)
+        
+        await query.edit_message_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
+    
+    elif query.data == "toggle_bot":
+        if user_id not in ADMIN_IDS:
+            return
+        
+        current_status = db.get_setting("bot_active")
+        new_status = "0" if current_status == "1" else "1"
+        db.update_setting("bot_active", new_status)
+        
+        await query.edit_message_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
+    
+    elif query.data == "stats":
+        if user_id not in ADMIN_IDS:
+            return
+        
+        stats = db.get_stats()
         stats_text = f"""
-📊 *آمار ربات* 📊
+📊 *آمار ربات*
 
-👥 تعداد کاربران: {stats['total_users']}
-📥 تعداد دانلودها: {stats['total_downloads']}
-🚫 کاربران محروم: {stats['banned_users']}
+👥 *کاربران*:
+• کل کاربران: {stats['total_users']}
+• کاربران بن شده: {stats['banned_users']}
 
-📅 تاریخ بروزرسانی: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+📥 *دانلودها*:
+• تعداد کل دانلودها: {stats['total_downloads']}
         """
         
         back_button = [[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin")]]
-        await query.message.edit_text(stats_text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(back_button))
-    
-    elif data == "broadcast" and user_id in ADMIN_IDS:
-        # ذخیره وضعیت فعلی در context برای استفاده در مراحل بعدی
-        context.user_data['awaiting_broadcast'] = True
         
-        back_button = [[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]]
-        await query.message.edit_text(
-            "📣 *ارسال پیام همگانی*\n\nلطفاً پیام مورد نظر خود را ارسال کنید:",
+        await query.edit_message_text(
+            text=stats_text,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(back_button)
         )
     
-    elif data == "confirm_broadcast" and user_id in ADMIN_IDS:
-        broadcast_message = context.user_data.get('broadcast_message', '')
-        if not broadcast_message:
-            await query.message.edit_text(
-                "❌ پیام همگانی یافت نشد. لطفاً مجدداً تلاش کنید.",
-                reply_markup=get_admin_menu()
-            )
+    elif query.data == "broadcast":
+        if user_id not in ADMIN_IDS:
             return
         
-        # دریافت لیست کاربران فعال
-        users = db.get_all_users()
-        total_users = len(users)
-        success_count = 0
+        context.user_data['awaiting_broadcast'] = True
         
-        status_message = await query.message.edit_text(
-            f"📣 در حال ارسال پیام به {total_users} کاربر...\n\nارسال شده: 0/{total_users}"
+        await query.edit_message_text(
+            "📣 لطفاً متن پیام همگانی خود را ارسال کنید:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]])
+        )
+    
+    elif query.data == "confirm_broadcast":
+        if user_id not in ADMIN_IDS:
+            return
+        
+        broadcast_message = context.user_data.get('broadcast_message', '')
+        users = db.get_all_users()
+        sent_count = 0
+        failed_count = 0
+        
+        progress_message = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"⏳ در حال ارسال پیام به {len(users)} کاربر..."
         )
         
-        # ارسال پیام به کاربران
-        for idx, user_id in enumerate(users):
+        for u_id in users:
             try:
                 await context.bot.send_message(
-                    chat_id=user_id,
-                    text=broadcast_message,
+                    chat_id=u_id,
+                    text=f"📣 *پیام از طرف مدیریت*\n\n{broadcast_message}",
                     parse_mode=ParseMode.MARKDOWN
                 )
-                success_count += 1
+                sent_count += 1
                 
-                # بروزرسانی وضعیت هر 10 کاربر
-                if (idx + 1) % 10 == 0:
-                    await status_message.edit_text(
-                        f"📣 در حال ارسال پیام به {total_users} کاربر...\n\nارسال شده: {idx + 1}/{total_users}"
+                # بروزرسانی پیام پیشرفت هر 10 کاربر
+                if sent_count % 10 == 0:
+                    await progress_message.edit_text(
+                        f"⏳ در حال ارسال پیام... ({sent_count}/{len(users)} کاربر)"
                     )
                 
-                # تاخیر کوتاه برای جلوگیری از محدودیت API تلگرام
-                await asyncio.sleep(0.1)
+                # اضافه کردن تأخیر برای جلوگیری از محدودیت‌های تلگرام
+                await asyncio.sleep(0.05)
             except Exception as e:
-                logger.error(f"Error sending broadcast to user {user_id}: {str(e)}")
+                failed_count += 1
         
-        await status_message.edit_text(
-            f"✅ پیام همگانی به {success_count} کاربر از {total_users} کاربر ارسال شد.",
-            reply_markup=get_admin_menu()
+        await progress_message.edit_text(
+            f"✅ پیام همگانی ارسال شد!\n\n"
+            f"• ارسال موفق: {sent_count} کاربر\n"
+            f"• ارسال ناموفق: {failed_count} کاربر",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_admin")]])
         )
     
-    elif data == "back_to_admin" and user_id in ADMIN_IDS:
-        # پاک کردن وضعیت‌های انتظار
-        if 'awaiting_broadcast' in context.user_data:
-            context.user_data.pop('awaiting_broadcast')
-        if 'broadcast_message' in context.user_data:
-            context.user_data.pop('broadcast_message')
-        if 'awaiting_user_id_for_ban' in context.user_data:
-            context.user_data.pop('awaiting_user_id_for_ban')
-        if 'awaiting_user_id_for_unban' in context.user_data:
-            context.user_data.pop('awaiting_user_id_for_unban')
+    elif query.data == "back_to_admin":
+        if user_id not in ADMIN_IDS:
+            return
         
-        await query.message.edit_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
+        # پاک کردن حالت‌های انتظار
+        if 'awaiting_broadcast' in context.user_data:
+            del context.user_data['awaiting_broadcast']
+        
+        if 'broadcast_message' in context.user_data:
+            del context.user_data['broadcast_message']
+        
+        if 'awaiting_user_id_for_ban' in context.user_data:
+            del context.user_data['awaiting_user_id_for_ban']
+        
+        if 'awaiting_user_id_for_unban' in context.user_data:
+            del context.user_data['awaiting_user_id_for_unban']
+        
+        await query.edit_message_text("🔐 *پنل مدیریت ربات*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu())
     
-    elif data == "user_management" and user_id in ADMIN_IDS:
-        keyboard = [
-            [InlineKeyboardButton("🚫 بن کاربر", callback_data="ban_user")],
-            [InlineKeyboardButton("✅ آنبن کاربر", callback_data="unban_user")],
+    elif query.data == "user_management":
+        if user_id not in ADMIN_IDS:
+            return
+        
+        user_management_keyboard = [
+            [InlineKeyboardButton("🚫 بن کردن کاربر", callback_data="ban_user")],
+            [InlineKeyboardButton("✅ آنبن کردن کاربر", callback_data="unban_user")],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin")]
         ]
-        await query.message.edit_text(
-            "👤 *مدیریت کاربران*\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+        
+        await query.edit_message_text(
+            "👤 *مدیریت کاربران*\n\nلطفاً یک گزینه را انتخاب کنید:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(user_management_keyboard)
         )
     
-    elif data == "ban_user" and user_id in ADMIN_IDS:
+    elif query.data == "ban_user":
+        if user_id not in ADMIN_IDS:
+            return
+        
         context.user_data['awaiting_user_id_for_ban'] = True
         
-        keyboard = [[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]]
-        await query.message.edit_text(
-            "🚫 *بن کاربر*\n\nلطفاً آی‌دی عددی کاربر مورد نظر را وارد کنید:",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "🚫 لطفاً آی‌دی عددی کاربر مورد نظر برای بن را وارد کنید:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]])
         )
     
-    elif data == "unban_user" and user_id in ADMIN_IDS:
+    elif query.data == "unban_user":
+        if user_id not in ADMIN_IDS:
+            return
+        
         context.user_data['awaiting_user_id_for_unban'] = True
         
-        keyboard = [[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]]
-        await query.message.edit_text(
-            "✅ *آنبن کاربر*\n\nلطفاً آی‌دی عددی کاربر مورد نظر را وارد کنید:",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "✅ لطفاً آی‌دی عددی کاربر مورد نظر برای آنبن را وارد کنید:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="back_to_admin")]])
         )
 
-# تابع اصلی
+# هندلر کامند راهنما
+async def help_command(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    
+    # بررسی وضعیت بن
+    if db.is_user_banned(user_id):
+        await update.message.reply_text("⛔️ شما از استفاده از این ربات محروم شده‌اید.")
+        return
+    
+    # بررسی وضعیت ربات
+    if db.get_setting("bot_active") != "1" and user_id not in ADMIN_IDS:
+        await update.message.reply_text("🔧 ربات در حال حاضر در دسترس نمی‌باشد. لطفاً بعداً مراجعه کنید.")
+        return
+    
+    help_text = """
+📋 *راهنمای استفاده از ربات*
+
+این ربات به شما امکان دانلود محتوا از پلتفرم‌های زیر را می‌دهد:
+
+• *اینستاگرام*: پست‌ها، ریل‌ها و استوری‌ها
+• *تیک‌تاک*: ویدیوها (بدون واترمارک)
+• *پینترست*: تصاویر با کیفیت بالا
+• *یوتیوب*: ویدیوها و فایل‌های صوتی
+
+🔹 *نحوه استفاده*:
+۱. لینک مورد نظر خود را کپی کنید
+۲. آن را در چت ربات ارسال کنید
+۳. منتظر دانلود و ارسال فایل باشید
+
+⚠️ *نکات*:
+• برای دانلود از یوتیوب، از VPN استفاده کنید
+• در صورت بروز خطا، مجدداً تلاش کنید
+    """
+    
+    # بررسی عضویت کاربر
+    is_member = await check_user_membership(user_id, context.bot)
+    
+    if not is_member and db.get_setting("mandatory_join") == "1":
+        await update.message.reply_text(
+            "👋 برای استفاده از ربات ابتدا در کانال ما عضو شوید:",
+            reply_markup=get_join_markup()
+        )
+    else:
+        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu())
+
+# هندلر کامند درباره ما
+async def about_command(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    
+    # بررسی وضعیت بن
+    if db.is_user_banned(user_id):
+        await update.message.reply_text("⛔️ شما از استفاده از این ربات محروم شده‌اید.")
+        return
+    
+    # بررسی وضعیت ربات
+    if db.get_setting("bot_active") != "1" and user_id not in ADMIN_IDS:
+        await update.message.reply_text("🔧 ربات در حال حاضر در دسترس نمی‌باشد. لطفاً بعداً مراجعه کنید.")
+        return
+    
+    about_text = """
+👨‍💻 *درباره ما*
+
+این ربات توسط تیم نکسزو طراحی و توسعه داده شده است.
+
+🔹 *ویژگی‌های ربات*:
+• دانلود از اینستاگرام، تیک‌تاک، پینترست و یوتیوب
+• سرعت بالا و کیفیت عالی
+• رابط کاربری ساده و کاربرپسند
+• پشتیبانی ۲۴ ساعته
+
+📱 *ارتباط با ما*:
+• کانال: @NexzoTeam
+• پشتیبانی: @NexzoSupport
+    """
+    
+    # بررسی عضویت کاربر
+    is_member = await check_user_membership(user_id, context.bot)
+    
+    if not is_member and db.get_setting("mandatory_join") == "1":
+        await update.message.reply_text(
+            "👋 برای استفاده از ربات ابتدا در کانال ما عضو شوید:",
+            reply_markup=get_join_markup()
+        )
+    else:
+        await update.message.reply_text(about_text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu())
+
 def main():
-    # راه‌اندازی ربات
+    # ایجاد نمونه از برنامه
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # اضافه کردن هندلرها
+    # افزودن هندلرها
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", lambda update, context: update.message.reply_text(
-        "📚 *راهنمای استفاده از ربات* 📚\n\nبرای دانلود محتوا، کافیست لینک مورد نظر خود را از یکی از پلتفرم‌های زیر ارسال کنید:\n\n*اینستاگرام*: لینک پست، ریل یا استوری\n*تیک‌تاک*: لینک ویدیو\n*پینترست*: لینک پین\n\n🔹 ربات به صورت خودکار نوع لینک را تشخیص داده و محتوا را برای شما دانلود می‌کند.",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=get_main_menu()
-    )))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("about", about_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # شروع پولینگ
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
